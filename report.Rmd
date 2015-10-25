@@ -5,18 +5,165 @@ date: "October 23, 2015"
 output: html_document
 ---
 
-This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+## Background
 
-When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. 
 
+In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+### Install Packages
 ```{r}
-summary(cars)
+#setwd('~/github/yuganghu/Coursera-PML')
+#install.packages("corrplot")
+#install.packages("rpart.plot")
 ```
 
-You can also embed plots, for example:
+### Data Setup
 
 ```{r, echo=FALSE}
-plot(cars)
+library(curl)
+library(caret)
+library(rpart)
+library(rpart.plot)
+library(corrplot)
+library(randomForest)
+library(gbm)
 ```
 
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+### Load Data
+
+```{r, echo=FALSE, cache=TRUE}
+trainUrl <-"https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+testUrl <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+localDataDir <- "./data-local"
+trainFile <- paste(localDataDir, "/pml-training.csv", sep = "")
+testFile  <- paste(localDataDir, "/pml-testing.csv", sep = "")
+if (!file.exists( localDataDir )) {
+  dir.create(localDataDir)
+}
+
+# Download training file if not existed
+if (!file.exists(trainFile)) {
+  download.file(trainUrl, destfile=trainFile, method="curl")
+}
+# Download test file if not existed
+if (!file.exists(testFile)) {
+  download.file(testUrl, destfile=testFile, method="curl")
+}
+```
+
+### Read the Data
+Now we can read the two csv files into data frames.  
+```{r, cache = T}
+trainRaw <- read.csv(trainFile)
+testRaw <- read.csv(testFile)
+```
+The training data set contains 19622 observations and 160 variables, while the testing data set contains 20 observations and 160 variables. The "classe" variable in the training set is the outcome to predict. 
+
+### Clean the data
+In this step, we will clean the data and get rid of observations with missing values as well as some meaningless variables.
+```{r, cache = T}
+summary(trainRaw)
+```
+First, we remove columns that contain NA missing values.
+```{r, cache = T}
+trainRaw <- trainRaw[, colSums(is.na(trainRaw)) == 0] 
+testRaw <- testRaw[, colSums(is.na(testRaw)) == 0] 
+```  
+Next, we get rid of some columns that do not contribute much to the accelerometer measurements.
+```{r, cache = T}
+classe <- trainRaw$classe
+removeColumnsTrain <- grep("^X|user_name|timestamp|window", names(trainRaw))
+trainRaw <- trainRaw[, -removeColumnsTrain]
+# Keep numeric columns
+cleanedTrainData <- trainRaw[, sapply(trainRaw, is.numeric)]
+cleanedTrainData$classe <- classe
+
+removeColumnsTest <- grep("^X|user_name|timestamp|window", names(testRaw))
+testRaw <- testRaw[, -removeColumnsTest]
+cleanedTestData <- testRaw[, sapply(testRaw, is.numeric)]
+
+names(cleanedTrainData)
+```
+Now, the cleaned training data set contains 19622 observations and 53 variables, while the cleaned testing data set contains 20 observations and 55 variables.
+
+### Split the data
+Then, we can split the cleaned training set into a pure training data set (60%) and a validation data set (40%). We will use the validation data set to conduct cross validation in future steps.  
+```{r, cache = T}
+set.seed(22988)
+inTrain <- createDataPartition(cleanedTrainData$classe, p=0.60, list=F)
+trainData <- cleanedTrainData[inTrain, ]
+testData <- cleanedTrainData[-inTrain, ]
+```
+
+## Data Modeling
+
+### Random Forest
+We fit a predictive model for activity recognition using **Random Forest** algorithm because it automatically selects important variables and is robust to correlated covariates & outliers in general.   
+```{r, cache = T}
+controlRf <- trainControl(method="cv", 4)
+modelRf <- train(classe ~ ., data=trainData, method="rf", trControl=controlRf, ntree=280)
+modelRf
+```
+Then, we estimate the performance of the model on the validation data set.  
+```{r, cache = T}
+predictRf <- predict(modelRf, testData)
+confusionMatrix(testData$classe, predictRf)
+```
+```{r, cache = T}
+accuracy <- postResample(predictRf, testData$classe)
+accuracy
+oose <- 1 - as.numeric(confusionMatrix(testData$classe, predictRf)$overall[1])
+oose
+```
+So, the estimated accuracy of the model is 99.3% and the estimated out-of-sample error is 0.69%.
+
+### Decision Tree (GBM)
+
+```{r, cache = T}
+
+modelGbm <- train(classe ~ ., data=trainData, method="gbm", verbose=FALSE)
+modelGbm
+```
+
+```{r, cache = T}
+predictGbm <- predict(modelGbm, testData)
+confusionMatrix(testData$classe, predictGbm)
+```
+```{r, cache = T}
+accuracyGbm <- postResample(predictGbm, testData$classe)
+accuracyGbm
+ooseGbm <- 1 - as.numeric(confusionMatrix(testData$classe, predictGbm)$overall[1])
+ooseGbm
+```
+
+So, the estimated accuracy of the model is 96.15% and the estimated out-of-sample error is 3.8%.
+
+## Predicting for Test Data Set
+
+### Random Forest Result
+Apply the model to the original testing data set. 
+```{r, cache = T}
+resultRf <- predict(modelRf, cleanedTestData[, -length(names(cleanedTestData))])
+resultRf
+```  
+
+### Decision Tree (GBM) Result
+```{r, cache = T}
+resultGbm <- predict(modelGbm, cleanedTestData[, -length(names(cleanedTestData))])
+resultGbm
+```  
+
+## Appendix: Figures
+
+1. Random Forest Cross-Validation
+```{r, echo = FALSE}
+plot(modelRf$finalModel, main="Random Forest Cross-Validation")
+```
+
+2. Decision Tree Visualization
+```{r, cache = T}
+treeModel <- rpart(classe ~ ., data=trainData, method="class")
+prp(treeModel)
+```
+
