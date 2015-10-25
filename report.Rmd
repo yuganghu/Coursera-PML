@@ -85,7 +85,7 @@ cleanedTestData <- testRaw[, sapply(testRaw, is.numeric)]
 
 names(cleanedTrainData)
 ```
-Now, the cleaned training data set contains 19622 observations and 53 variables, while the cleaned testing data set contains 20 observations and 55 variables.
+Now, the cleaned training data set contains 19622 observations and 53 variables, while the cleaned testing data set contains 20 observations and 53 variables.
 
 ### Split the data
 Then, we can split the cleaned training set into a pure training data set (60%) and a validation data set (40%). We will use the validation data set to conduct cross validation in future steps.  
